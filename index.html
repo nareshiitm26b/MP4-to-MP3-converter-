@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MP4 to MP3 converter</title>
+<style>
+  :root {
+    --bg: #f3f6f4;
+    --panel: #ffffff;
+    --ink: #14211c;
+    --muted: #5b6b64;
+    --line: #cfdad4;
+    --accent: #0f766e;
+    --accent-ink: #ffffff;
+    --error: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1613;
+      --panel: #16221d;
+      --ink: #e6f0eb;
+      --muted: #93a59c;
+      --line: #2b3d35;
+      --accent: #2dd4bf;
+      --accent-ink: #062521;
+      --error: #f97066;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  main {
+    width: 100%;
+    max-width: 520px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px;
+  }
+  h1 { font-size: 1.5rem; margin: 0 0 6px; }
+  p.sub { margin: 0 0 22px; color: var(--muted); line-height: 1.5; }
+  .drop {
+    display: block;
+    border: 2px dashed var(--line);
+    border-radius: 10px;
+    padding: 30px 16px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .drop.over, .drop:focus-within { border-color: var(--accent); color: var(--ink); }
+  .drop input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  #fileName { color: var(--ink); font-weight: 600; word-break: break-all; }
+  button {
+    margin-top: 18px;
+    width: 100%;
+    padding: 13px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button:focus-visible, .drop:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  progress { width: 100%; height: 10px; margin-top: 18px; accent-color: var(--accent); }
+  #status { margin: 14px 0 0; min-height: 1.4em; color: var(--muted); }
+  #status.error { color: var(--error); }
+  #download {
+    display: none;
+    margin-top: 14px;
+    text-align: center;
+    padding: 13px;
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    color: var(--ink);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .note { margin: 20px 0 0; font-size: .85rem; color: var(--muted); line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <h1>MP4 to MP3 converter</h1>
+  <p class="sub">Pick a video and get its audio as an MP3. The conversion happens on your computer, so your file is never uploaded.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="video/mp4,.mp4,video/*">
+    <span id="fileName">Click to choose an MP4 file, or drop it here</span>
+  </label>
+
+  <button id="convert" disabled>Convert to MP3</button>
+  <progress id="bar" max="100" value="0" hidden></progress>
+  <p id="status" role="status"></p>
+  <a id="download" href="#">Download MP3</a>
+
+  <p class="note">The first conversion takes a little longer while the converter loads (about 25 MB). After that it is faster.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<script>
+  const fileInput = document.getElementById('file');
+  const drop = document.getElementById('drop');
+  const nameEl = document.getElementById('fileName');
+  const convertBtn = document.getElementById('convert');
+  const bar = document.getElementById('bar');
+  const statusEl = document.getElementById('status');
+  const download = document.getElementById('download');
+
+  let chosen = null;
+  let ffmpeg = null;
+  let lastUrl = null;
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.className = isError ? 'error' : '';
+  }
+
+  function choose(file) {
+    if (!file) return;
+    chosen = file;
+    nameEl.textContent = file.name;
+    convertBtn.disabled = false;
+    download.style.display = 'none';
+    bar.hidden = true;
+    setStatus('');
+  }
+
+  fileInput.addEventListener('change', () => choose(fileInput.files[0]));
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => choose(e.dataTransfer.files[0]));
+
+  async function loadFfmpeg() {
+    if (ffmpeg) return ffmpeg;
+    const { createFFmpeg } = FFmpeg;
+    ffmpeg = createFFmpeg({
+      log: false,
+      corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+    });
+    ffmpeg.setProgress(({ ratio }) => {
+      if (ratio >= 0 && ratio <= 1) bar.value = Math.round(ratio * 100);
+    });
+    await ffmpeg.load();
+    return ffmpeg;
+  }
+
+  convertBtn.addEventListener('click', async () => {
+    if (!chosen) return;
+    convertBtn.disabled = true;
+    download.style.display = 'none';
+    bar.hidden = false;
+    bar.value = 0;
+    try {
+      setStatus('Loading the converter...');
+      const ff = await loadFfmpeg();
+      setStatus('Converting. Please keep this tab open.');
+      const data = new Uint8Array(await chosen.arrayBuffer());
+      ff.FS('writeFile', 'input.mp4', data);
+      await ff.run('-i', 'input.mp4', '-vn', '-codec:a', 'libmp3lame', '-q:a', '2', 'output.mp3');
+      const out = ff.FS('readFile', 'output.mp3');
+      ff.FS('unlink', 'input.mp4');
+      ff.FS('unlink', 'output.mp3');
+
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = URL.createObjectURL(new Blob([out.buffer], { type: 'audio/mpeg' }));
+      download.href = lastUrl;
+      download.download = chosen.name.replace(/\.[^.]+$/, '') + '.mp3';
+      download.style.display = 'block';
+      bar.value = 100;
+      setStatus('Done. Your MP3 is ready.');
+    } catch (err) {
+      console.error(err);
+      setStatus('The conversion failed. Try a smaller file, or use Chrome or Edge on a computer.', true);
+    } finally {
+      convertBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
