@@ -184,7 +184,8 @@
       setStatus('Done. Your MP3 is ready.');
     } catch (err) {
       console.error(err);
-      setStatus('The conversion failed. Try a smaller file, or use Chrome or Edge on a computer.', true);
+      const why = err && err.message ? err.message : String(err);
+      setStatus('The conversion failed. Details: ' + why + (typeof SharedArrayBuffer === 'undefined' ? ' (SharedArrayBuffer missing)' : ''), true);
     } finally {
       convertBtn.disabled = false;
     }
